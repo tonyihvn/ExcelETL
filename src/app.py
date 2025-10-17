@@ -10,15 +10,12 @@ class ExcelETLApp(tk.Tk):
         self.title("Excel ETL Tool")
         self.geometry("600x600")
 
-        # Fixed new headers
-        self.new_headers = [
-            'iid', 'state', 'id', 'location', 'model', 'serial_number', 'tag_number',
-            'user', 'date_of_purchase', 'grant', 'category', 'batch', 'condition',
-            'date_delivered', 'received_by', 'comments', 'other_info', 'created_at', 'updated_at'
-        ]
+        # Destination headers loaded from template file (initially empty)
+        self.new_headers = []
 
         # Variables
         self.old_file_path = ""
+        self.template_file_path = ""
         self.mapping_widgets = {}
 
         # UI Elements
@@ -31,9 +28,15 @@ class ExcelETLApp(tk.Tk):
         
         self.old_file_button = tk.Button(file_frame, text="Upload Source Excel File", command=self.upload_old_file)
         self.old_file_button.pack(side='left', expand=True, fill='x')
+
+        self.template_file_button = tk.Button(file_frame, text="Upload Template (new) File", command=self.upload_template_file)
+        self.template_file_button.pack(side='left', expand=True, fill='x', padx=(5,0))
         
-        self.file_label = tk.Label(self.main_frame, text="No file selected", relief=tk.SUNKEN)
+        self.file_label = tk.Label(self.main_frame, text="No source file selected", relief=tk.SUNKEN)
         self.file_label.pack(fill='x', pady=5)
+
+        self.template_label = tk.Label(self.main_frame, text="No template file selected", relief=tk.SUNKEN)
+        self.template_label.pack(fill='x', pady=5)
 
         # --- New Filename ---
         filename_frame = tk.Frame(self.main_frame)
@@ -70,8 +73,22 @@ class ExcelETLApp(tk.Tk):
         file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx;*.xls")])
         if file_path:
             self.old_file_path = file_path
-            self.file_label.config(text=os.path.basename(file_path))
+            self.file_label.config(text=f"Source: {os.path.basename(file_path)}")
             self.create_mapping_ui()
+
+    def upload_template_file(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx;*.xls")])
+        if file_path:
+            self.template_file_path = file_path
+            self.template_label.config(text=f"Template: {os.path.basename(file_path)}")
+            # Load headers from template (use first sheet only)
+            try:
+                df = pd.read_excel(self.template_file_path, nrows=0)
+                self.new_headers = df.columns.tolist()
+                # If mapping UI already present, refresh dropdowns
+                self.create_mapping_ui()
+            except Exception as e:
+                messagebox.showerror("Error", f"Could not read template headers:\n{e}")
 
     def create_mapping_ui(self):
         for widget in self.mapping_frame.winfo_children():
@@ -88,12 +105,13 @@ class ExcelETLApp(tk.Tk):
                 old_headers.update(df.columns.tolist())
             
             sorted_headers = sorted(list(old_headers))
-            
-            # Add a header for the mapping section
-            tk.Label(self.mapping_frame, text="Map Source Columns to Destination Columns", font=('Helvetica', 10, 'bold')).pack(pady=5)
-
 
             self.mapping_widgets = {}
+
+            # If template headers are not loaded yet, show a message
+            if not self.new_headers:
+                tk.Label(self.mapping_frame, text="Upload a template (new) file to load destination headers.", foreground='red').pack(pady=5)
+
             for old_col in sorted_headers:
                 frame = tk.Frame(self.mapping_frame)
                 frame.pack(fill='x', pady=2, padx=5)
@@ -103,8 +121,9 @@ class ExcelETLApp(tk.Tk):
 
                 variable = tk.StringVar(self)
                 
-                # Dropdown will contain the new, fixed headers
-                dropdown = ttk.Combobox(frame, textvariable=variable, values=[""] + self.new_headers, state="readonly")
+                # Dropdown will contain the new headers loaded from template
+                dropdown_values = [""] + (self.new_headers if self.new_headers else [])
+                dropdown = ttk.Combobox(frame, textvariable=variable, values=dropdown_values, state="readonly")
                 dropdown.set("") # Default to empty
                 dropdown.pack(side='left', expand=True, fill='x')
                 
@@ -118,12 +137,16 @@ class ExcelETLApp(tk.Tk):
             messagebox.showwarning("Warning", "Please upload a source file.")
             return
 
+        if not self.template_file_path:
+            messagebox.showwarning("Warning", "Please upload a template (new) file first.")
+            return
+
         new_filename = self.new_filename_entry.get().strip()
         if not new_filename:
             messagebox.showwarning("Warning", "Please enter a filename for the new file.")
             return
 
-        # The mapping is now {old_column: new_column}
+        # The mapping is {old_column: new_column}
         mapping = {old_col: var.get() for old_col, var in self.mapping_widgets.items() if var.get()}
         
         if not mapping:
